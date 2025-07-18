@@ -11,7 +11,8 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const body = await req.json();
+         const body = await req.json();
+         const { email, password } = body;
         console.log('Login request body:', body);
 
         const response = await fetch(`${carBaseUrl}/login`, {
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(body),
+            body: JSON.stringify({email, password}),
         });
 
         const data = await response.json();

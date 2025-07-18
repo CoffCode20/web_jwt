@@ -1,241 +1,250 @@
-"use client"
+"use client";
 
-import { useState} from "react";
-import { getAuthToken, getRefreshToken, logout } from "@/lib/auth";
-import { Button } from "@/components/ui/button";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
 import secureLocalStorage from "react-secure-storage";
-import {CreateCarType} from "@/lib/types";
+import { getAuthToken, getRefreshToken, logout } from "@/lib/auth";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 
-const sampleCarData: CreateCarType = {
-    make: "Tesla",
-    model: "Model 002",
-    year: 2024,
-    price: 35000,
-    mileage: 0,
-    description: "Brand new Toyota Camry with excellent features",
-    color: "Silver",
-    fuel_type: "gasoline",
-    transmission: "automatic",
-    image: "https://car-nextjs-api.cheatdev.online/uploads/41ff38ec-87ad-4ac1-86e3-f1a7e99c04df.png"
-};
+// 1. Zod Schema
+const carFormSchema = z.object({
+  make: z.string().min(1),
+  model: z.string().min(1),
+  year: z.coerce.number().int().gte(1886).lte(new Date().getFullYear()),
+  price: z.coerce.number().positive(),
+  mileage: z.coerce.number().nonnegative(),
+  description: z.string().optional(),
+  color: z.string().min(1),
+  fuel_type: z.string().min(1),
+  transmission: z.string().min(1),
+  image: z.string().url({ message: "Must be a valid image URL" }),
+});
 
-export default function CreateFunction() {
-    const [loading, setLoading] = useState(false);
-    const [refreshing, setRefreshing] = useState(false);
-    const [message, setMessage] = useState('');
-    const [error, setError] = useState('');
-    const [carData, setCarData] = useState<CreateCarType | null>(null);
+type CarFormValues = z.infer<typeof carFormSchema>;
 
-    // this is for refresh for expired token 😎😎😎😎
-    const refreshAccessToken = async () => {
-        setRefreshing(true);
-        setError('');
-        setMessage('');
+export default function CreateCarFormWithAuth() {
+  const form = useForm<CarFormValues>({
+    resolver: zodResolver(carFormSchema) as any,
+    defaultValues: {
+      make: "",
+      model: "",
+      year: new Date().getFullYear(),
+      price: 0,
+      mileage: 0,
+      description: "",
+      color: "",
+      fuel_type: "",
+      transmission: "",
+      image: "",
+    },
+  });
 
-        try {
-            const refreshToken = getRefreshToken();
-            console.log("Refresh token:", refreshToken ? "Found" : "Missing");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [carData, setCarData] = useState<CarFormValues | null>(null);
 
-            if (!refreshToken) {
-                throw new Error('No refresh token found. Please login again.');
-            }
+  // Submit car data with token
+  async function onSubmit(values: CarFormValues) {
+    setLoading(true);
+    setMessage("");
+    setError("");
+    try {
+      const token = getAuthToken();
+      if (!token) throw new Error("Access token missing!");
 
-            // Call your refresh token API (server-side)
-            const response = await fetch('/api/refresh', {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ refreshToken })
-            });
+      const res = await fetch("https://car-nextjs-api.cheatdev.online/cars", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(values),
+      });
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Failed to refresh token');
-            }
+      const result = await res.json();
 
-            const data = await response.json();
-            console.log('Token refresh response:', data);
-
-            // Store the new access token
-            if (data.token || data.access_token) {
-                const newToken = data.token || data.access_token;
-                secureLocalStorage.setItem("authToken", newToken);
-                console.log(' New access token stored successfully');
-                setMessage('Access token refreshed successfully!');
-            } else {
-                throw new Error('No new access token received');
-            }
-
-            // Update refresh token if provided
-            if (data.refreshToken || data.refresh_token) {
-                const newRefreshToken = data.refreshToken || data.refresh_token;
-                secureLocalStorage.setItem("refreshToken", newRefreshToken);
-            }
-
-        } catch (error) {
-            console.error('Token refresh error:', error);
-            setError(error instanceof Error ? error.message : 'Failed to refresh token');
-        } finally {
-            setRefreshing(false);
+      if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error("Access token expired. Please refresh your token.");
         }
-    };
+        throw new Error(result.message || "Failed to create car");
+      }
 
-    // logout function
-    const logOutAccessToken = async () => {
-        setRefreshing(true);
-        setError('');
-        setMessage('');
+      setMessage("✅ Car created successfully!");
+      setCarData(result.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-        try {
-            const logOutToken = logout();
-            console.log(logOutToken)
-        } catch (error) {
-            console.error('Token refresh error:', error);
-            setError(error instanceof Error ? error.message : 'Failed to refresh token');
-        } finally {
-            setRefreshing(false);
-        }
-    };
+  // Refresh token
+  const refreshAccessToken = async () => {
+    setRefreshing(true);
+    setError("");
+    setMessage("");
 
+    try {
+      const refreshToken = getRefreshToken();
+      if (!refreshToken) throw new Error("No refresh token found.");
 
-    // handle create function 😎
-    const createCar = async (userData: CreateCarType) => {
-        const access_token = getAuthToken();
-        console.log("The access_token", access_token ? "Found" : "Missing");
+      const res = await fetch("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
 
-        if (!access_token) {
-            throw new Error('No access token found. Please login or refresh your token.');
-        }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to refresh token");
 
-        const response = await fetch(`https://car-nextjs-api.cheatdev.online/cars`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${access_token}`
-            },
-            body: JSON.stringify(userData)
-        });
+      secureLocalStorage.setItem("authToken", data.token || data.access_token);
+      if (data.refresh_token || data.refreshToken)
+        secureLocalStorage.setItem(
+          "refreshToken",
+          data.refresh_token || data.refreshToken
+        );
 
-        if (!response.ok) {
-            const errorData = await response.json();
+      setMessage("🔁 Token refreshed successfully!");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
-            // If token expired, suggest refresh
-            if (response.status === 401) {
-                throw new Error('Access token expired. Please refresh your token.');
-            }
+  // Logout
+  const logOutAccessToken = () => {
+    logout();
+    setMessage("You have been logged out.");
+    setCarData(null);
+  };
 
-            throw new Error(errorData.message || 'Failed to create car');
-        }
-
-        const data = await response.json();
-        return data;
-    };
-
-    // handle submission create the car
-    const handleCreateCar = async () => {
-
-        setLoading(true);
-        setError('');
-        setMessage('');
-
-        try {
-            const result = await createCar(sampleCarData);
-            setMessage('Car created successfully!');
-            setCarData(result.data);
-            console.log('Car created:', result);
-        } catch (error) {
-            setError(error instanceof Error ? error.message : 'Failed to create car');
-            console.error('Error creating car:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // Check current token status make sure the token is available or not
-    const checkTokenStatus = () => {
-        const accessToken = getAuthToken();
-        const refreshToken = getRefreshToken();
-
-        console.log('=== TOKEN STATUS 😎 ===');
-        console.log('Access Token:', accessToken ? 'Available' : 'Missing');
-        console.log('Refresh Token:', refreshToken ? 'Available' : 'Missing');
-
-        alert(`Access Token: ${accessToken ? 'Available' : 'Missing'}\nRefresh Token: ${refreshToken ? 'Available' : 'Missing'}`);
-    };
-
-    return (
-        <div className="container mx-auto p-6">
-            <div className="max-w-md mx-auto text-center">
-                <h1 className="text-2xl font-bold mb-6">Create Car</h1>
-
-                <div className="bg-gray-100 p-4 rounded-lg mb-6">
-                    <h3 className="font-semibold mb-2">Car to be created:</h3>
-                    <p>{sampleCarData.year} {sampleCarData.make} {sampleCarData.model}</p>
-                    <p>Price: ${sampleCarData.price.toLocaleString()}</p>
-                    <p>Color: {sampleCarData.color}</p>
-                </div>
-                {/* handle button create car */}
-                <div className="space-y-3 mb-6">
-                    <Button
-                        onClick={handleCreateCar}
-                        disabled={loading}
-                        className="w-full"
-                    >
-                        {loading ? 'Creating Car...' : 'Create Car Now'}
-                    </Button>
-                    {/* button handle renew accesstoken */}
-                    <Button
-                        onClick={refreshAccessToken}
-                        disabled={refreshing}
-                        variant="outline"
-                        className="w-full"
-                    >
-                        {refreshing ? 'Refreshing Token...' : '🔄 Refresh Access Token'}
-                    </Button>
-                    {/* status check up tha token ng der ot*/}
-                    <Button
-                        onClick={checkTokenStatus}
-                        variant="secondary"
-                        size="sm"
-                        className="w-full"
-                    >
-                        Check Token Status
-                    </Button>
-                    {/* logout */}
-                    <Button
-                        onClick={logOutAccessToken}
-                        variant="secondary"
-                        size="sm"
-                        className="w-full"
-                    >
-                        Logout
-                    </Button>
-                </div>
-                {/* error that occur */}
-                {error && (
-                    <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded mb-4">
-                        {error}
-                    </div>
-                )}
-                {/* bos message  */}
-
-                {message && (
-                    <div className="p-3 bg-green-100 border border-green-400 text-green-700 rounded mb-4">
-                        {message}
-                    </div>
-                )}
-
-                {/* preview data  */}
-                {carData && (
-                    <div className="bg-blue-50 p-4 rounded-lg">
-                        <h3 className="font-semibold mb-2">Created Car Details:</h3>
-                        <pre className="text-sm text-left overflow-auto max-h-48">
-                            {JSON.stringify(carData, null, 2)}
-                        </pre>
-                    </div>
-                )}
-            </div>
-        </div>
+  // Token check
+  const checkTokenStatus = () => {
+    const access = getAuthToken();
+    const refresh = getRefreshToken();
+    alert(
+      `Access Token: ${access ? "✅" : "❌"}\nRefresh Token: ${
+        refresh ? "✅" : "❌"
+      }`
     );
+  };
+
+  return (
+    <div className="max-w-xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-bold text-center">
+        🚗 Create Car (Zod Form)
+      </h1>
+
+      {/* Form */}
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          {[
+            "make",
+            "model",
+            "year",
+            "price",
+            "mileage",
+            "color",
+            "fuel_type",
+            "transmission",
+            "image",
+          ].map((name) => (
+            <FormField
+              key={name}
+              control={form.control}
+              name={name as keyof CarFormValues}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="capitalize">
+                    {name.replace("_", " ")}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      type={
+                        ["year", "price", "mileage"].includes(name)
+                          ? "number"
+                          : "text"
+                      }
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+          ))}
+          <FormField
+            control={form.control}
+            name="description"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Description</FormLabel>
+                <FormControl>
+                  <Textarea
+                    {...field}
+                    placeholder="Write a short description..."
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? "Submitting..." : "Submit Car"}
+          </Button>
+        </form>
+      </Form>
+
+      {/* Button Actions */}
+      <div className="space-y-2">
+        <Button
+          onClick={refreshAccessToken}
+          variant="outline"
+          className="w-full"
+          disabled={refreshing}
+        >
+          🔁 {refreshing ? "Refreshing..." : "Refresh Access Token"}
+        </Button>
+        <Button
+          onClick={checkTokenStatus}
+          variant="secondary"
+          size="sm"
+          className="w-full"
+        >
+          🔍 Check Token Status
+        </Button>
+        <Button
+          onClick={logOutAccessToken}
+          variant="secondary"
+          size="sm"
+          className="w-full"
+        >
+          🚪 Logout
+        </Button>
+      </div>
+
+      {/* Result Display */}
+      {error && <p className="text-red-600">{error}</p>}
+      {message && <p className="text-green-600">{message}</p>}
+      {carData && (
+        <div className="bg-gray-50 p-4 rounded border text-sm whitespace-pre-wrap">
+          <h3 className="font-semibold mb-1">✅ Created Car Data:</h3>
+          <pre>{JSON.stringify(carData, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  );
 }

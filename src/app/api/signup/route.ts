@@ -12,14 +12,20 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
+        const { username, email, password, confirmed_password } = body;
         console.log('Signup request body:', body);
 
         const response = await fetch(`${carBaseUrl}/register`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body),
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username,
+            email,
+            password,
+            confirmed_password,
+          }),
         });
 
         const data = await response.json();

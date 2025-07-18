@@ -1,10 +1,10 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +46,7 @@ export default function LoginPage() {
 
     try {
       await loginUser(data);
-      router.push("/cars");
+      router.push("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
       console.error("Login error:", err);

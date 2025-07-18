@@ -1,8 +1,13 @@
 "use client";
 
-import { useForm } from "react-hook-form";
-import { z } from "zod";
+import { Switch } from "@/components/ui/switch";
+import { getAuthToken, getRefreshToken, logout } from "@/lib/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import secureLocalStorage from "react-secure-storage";
+import { z } from "zod";
+import { Button } from "../ui/button";
 import {
   Form,
   FormControl,
@@ -11,36 +16,43 @@ import {
   FormLabel,
   FormMessage,
 } from "../ui/form";
-import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { Switch } from "@/components/ui/switch";
 
 const updateCarSchema = z.object({
-  make: z.string().min(1, { message: "Make is required" }),
-  model: z.string().min(1, { message: "Model is required" }),
-  year: z.coerce
-    .number()
-    .gte(1886)
-    .lte(new Date().getFullYear(), {
-      message: `Year must be between 1886 and ${new Date().getFullYear()}`,
-    }),
-  price: z.coerce.number().positive({ message: "Price must be positive" }),
-  mileage: z.coerce
-    .number()
-    .nonnegative({ message: "Mileage cannot be negative" }),
+  id: z.string().min(1, { message: "ID is required" }),
+  make: z.string().min(1),
+  model: z.string().min(1),
+  year: z.coerce.number().gte(1886).lte(new Date().getFullYear()),
+  price: z.coerce.number().positive(),
+  mileage: z.coerce.number().nonnegative(),
   description: z.string().optional(),
-  color: z.string().min(1, { message: "Color is required" }),
-  fuel_type: z.string().min(1, { message: "Fuel type is required" }),
-  transmission: z.string().min(1, { message: "Transmission is required" }),
+  color: z.string().min(1),
+  fuel_type: z.string().min(1),
+  transmission: z.string().min(1),
   image: z.string().url({ message: "Must be a valid image URL" }),
   is_sold: z.boolean(),
 });
 
 export default function UpdateCarFormComponent() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const token = getAuthToken();
+    setIsAuthenticated(!!token);
+    if (!token) {
+      setMessage("Please login first to update a car");
+    }
+  }, []);
+
   const form = useForm<z.infer<typeof updateCarSchema>>({
     resolver: zodResolver(updateCarSchema) as any,
     defaultValues: {
+      id: "",
       make: "",
       model: "",
       year: new Date().getFullYear(),
@@ -55,29 +67,92 @@ export default function UpdateCarFormComponent() {
     },
   });
 
-  async function onSubmit(values: z.infer<typeof updateCarSchema>) {
+  const refreshAccessToken = async () => {
+    setRefreshing(true);
+    setError("");
+    setMessage("");
+
     try {
-      const res = await fetch("/api/update", {
+      const refreshToken = getRefreshToken();
+      if (!refreshToken) throw new Error("No refresh token found.");
+
+      const res = await fetch("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to refresh token");
+
+      secureLocalStorage.setItem("authToken", data.token || data.access_token);
+      if (data.refresh_token || data.refreshToken) {
+        secureLocalStorage.setItem(
+          "refreshToken",
+          data.refresh_token || data.refreshToken
+        );
+      }
+
+      setMessage("🔁 Token refreshed successfully!");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const checkTokenStatus = () => {
+    const access = getAuthToken();
+    const refresh = getRefreshToken();
+    alert(
+      `Access Token: ${access ? "✅" : "❌"}\nRefresh Token: ${
+        refresh ? "✅" : "❌"
+      }`
+    );
+  };
+
+  const logOutAccessToken = () => {
+    logout();
+    setMessage("You have been logged out.");
+  };
+
+  async function onSubmit(values: z.infer<typeof updateCarSchema>) {
+    setIsLoading(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const token = getAuthToken();
+      if (!token) {
+        setMessage("Please login first");
+        setIsLoading(false);
+        return;
+      }
+
+      const res = await fetch("/api/crud/update-car", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(values),
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        console.error("Failed to update car");
+        throw new Error(data.message || "Failed to update car");
       }
 
-      const data = await res.json();
-      console.log("Success:", data);
-      return data;
-    } catch (error) {
-      console.error("Error:", error);
+      setMessage("✅ Car updated successfully!");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsLoading(false);
     }
   }
 
   const fields = [
+    "id",
     "make",
     "model",
     "year",
@@ -90,87 +165,108 @@ export default function UpdateCarFormComponent() {
   ] as const;
 
   return (
-    <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit(onSubmit)}
-        className="space-y-6 p-6 bg-white rounded-lg shadow-md max-w-2xl mx-auto"
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {fields.map((fieldName) => (
-            <FormField
-              key={fieldName}
-              control={form.control}
-              name={fieldName}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-sm font-medium text-gray-700 capitalize">
-                    {fieldName}
-                  </FormLabel>
-                  <FormControl>
-                    <Input
-                      {...field}
-                      type={
-                        ["year", "price", "mileage"].includes(fieldName)
-                          ? "number"
-                          : "text"
-                      }
-                      placeholder={`Enter ${fieldName}`}
-                      className="border-gray-300 focus:ring-2 focus:ring-blue-500 rounded-md"
-                    />
-                  </FormControl>
-                  <FormMessage className="text-red-500 text-xs mt-1" />
-                </FormItem>
-              )}
-            />
-          ))}
-        </div>
-        <FormField
-          control={form.control}
-          name="description"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-sm font-medium text-gray-700">
-                Description
-              </FormLabel>
-              <FormControl>
-                <Textarea
-                  {...field}
-                  placeholder="Describe the car in detail..."
-                  className="border-gray-300 focus:ring-2 focus:ring-blue-500 rounded-md min-h-[100px]"
-                />
-              </FormControl>
-              <FormMessage className="text-red-500 text-xs mt-1" />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="is_sold"
-          render={({ field }) => (
-            <FormItem className="flex items-center gap-3">
-              <FormLabel className="text-sm font-medium text-gray-700">
-                Sold
-              </FormLabel>
-              <FormControl>
-                <Switch
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                  className="data-[state=checked]:bg-blue-500"
-                />
-              </FormControl>
-              <FormMessage className="text-red-500 text-xs mt-1" />
-            </FormItem>
-          )}
-        />
-        <div className="flex justify-end">
+    <div className="max-w-2xl mx-auto space-y-4">
+      <Form {...form}>
+        <form
+          onSubmit={form.handleSubmit(onSubmit)}
+          className="space-y-6 p-6 bg-white rounded-lg shadow-md"
+        >
+          {message && <p className="text-green-600">{message}</p>}
+          {error && <p className="text-red-600">{error}</p>}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {fields.map((fieldName) => (
+              <FormField
+                key={fieldName}
+                control={form.control}
+                name={fieldName}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="capitalize">{fieldName}</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type={
+                          ["year", "price", "mileage"].includes(fieldName)
+                            ? "number"
+                            : "text"
+                        }
+                        placeholder={`Enter ${fieldName}`}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            ))}
+          </div>
+
+          <FormField
+            control={form.control}
+            name="description"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Description</FormLabel>
+                <FormControl>
+                  <Textarea {...field} />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="is_sold"
+            render={({ field }) => (
+              <FormItem className="flex items-center gap-3">
+                <FormLabel>Sold</FormLabel>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+
           <Button
             type="submit"
-            className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors"
+            className="w-full"
+            disabled={isLoading || !isAuthenticated}
           >
-            Update Car
+            {isLoading ? "Updating..." : "Update Car"}
           </Button>
-        </div>
-      </form>
-    </Form>
+        </form>
+      </Form>
+
+      {/* Token Management Buttons */}
+      <div className="space-y-2">
+        <Button
+          onClick={refreshAccessToken}
+          variant="outline"
+          className="w-full"
+          disabled={refreshing}
+        >
+          🔁 {refreshing ? "Refreshing..." : "Refresh Access Token"}
+        </Button>
+        <Button
+          onClick={checkTokenStatus}
+          variant="secondary"
+          size="sm"
+          className="w-full"
+        >
+          🔍 Check Token Status
+        </Button>
+        <Button
+          onClick={logOutAccessToken}
+          variant="secondary"
+          size="sm"
+          className="w-full"
+        >
+          🚪 Logout
+        </Button>
+      </div>
+    </div>
   );
 }

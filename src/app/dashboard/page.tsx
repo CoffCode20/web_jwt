@@ -1,6 +1,3 @@
-
-export default function DashboardPage() {
-    return (
-        <h1>This is DashboardPage</h1>
-    )
+export default function page() {
+  return <div>This is dashboard page</div>;
 }

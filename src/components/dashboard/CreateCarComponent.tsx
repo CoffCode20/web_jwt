@@ -1,14 +1,23 @@
 "use client";
 
-import { useForm } from "react-hook-form";
-import { z } from "zod";
+import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { getAuthToken, getRefreshToken, logout } from "@/lib/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Form, FormControl, FormField, FormItem, FormLabel } from "../ui/form";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import secureLocalStorage from "react-secure-storage";
+import { z } from "zod";
 
-// Schema
+// 1. Zod Schema
 const carFormSchema = z.object({
   make: z.string().min(1),
   model: z.string().min(1),
@@ -22,8 +31,10 @@ const carFormSchema = z.object({
   image: z.string().url({ message: "Must be a valid image URL" }),
 });
 
-export default function CreateCarFormComponent() {
-  const form = useForm<z.infer<typeof carFormSchema>>({
+type CarFormValues = z.infer<typeof carFormSchema>;
+
+export default function CreateCarFormWithAuth() {
+  const form = useForm<CarFormValues>({
     resolver: zodResolver(carFormSchema) as never,
     defaultValues: {
       make: "",
@@ -39,84 +50,199 @@ export default function CreateCarFormComponent() {
     },
   });
 
-  async function onSubmit(values: z.infer<typeof carFormSchema>) {
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [carData, setCarData] = useState<CarFormValues | null>(null);
+
+  // Submit car data with token
+  async function onSubmit(values: CarFormValues) {
+    setLoading(true);
+    setMessage("");
+    setError("");
     try {
-      const res = await fetch("/api/create", {
+      const token = getAuthToken();
+      if (!token) throw new Error("Access token missing!");
+
+      const res = await fetch("https://car-nextjs-api.cheatdev.online/cars", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(values),
       });
 
+      const result = await res.json();
+
       if (!res.ok) {
-        console.error("Failed to create car");
+        if (res.status === 401) {
+          throw new Error("Access token expired. Please refresh your token.");
+        }
+        throw new Error(result.message || "Failed to create car");
       }
 
-      const data = await res.json();
-      return data;
-    } catch (error) {
-      console.error("Error:", error);
+      setMessage("✅ Car created successfully!");
+      setCarData(result.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
     }
   }
 
+  // Refresh token
+  const refreshAccessToken = async () => {
+    setRefreshing(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const refreshToken = getRefreshToken();
+      if (!refreshToken) throw new Error("No refresh token found.");
+
+      const res = await fetch("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to refresh token");
+
+      secureLocalStorage.setItem("authToken", data.token || data.access_token);
+      if (data.refresh_token || data.refreshToken)
+        secureLocalStorage.setItem(
+          "refreshToken",
+          data.refresh_token || data.refreshToken
+        );
+
+      setMessage("🔁 Token refreshed successfully!");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Logout
+  const logOutAccessToken = () => {
+    logout();
+    setMessage("You have been logged out.");
+    setCarData(null);
+  };
+
+  // Token check
+  const checkTokenStatus = () => {
+    const access = getAuthToken();
+    const refresh = getRefreshToken();
+    alert(
+      `Access Token: ${access ? "✅" : "❌"}\nRefresh Token: ${
+        refresh ? "✅" : "❌"
+      }`
+    );
+  };
+
   return (
-      <div className="w-[500px] border p-8 rounded-lg mx-auto">
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            {[
-              "make",
-              "model",
-              "year",
-              "price",
-              "mileage",
-              "color",
-              "fuel_type",
-              "transmission",
-              "image",
-            ].map((fieldName) => (
-                <FormField
-                    key={fieldName}
-                    control={form.control}
-                    name={fieldName as keyof z.infer<typeof carFormSchema>}
-                    render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="capitalize">{fieldName}</FormLabel>
-                          <FormControl>
-                            <Input
-                                {...field}
-                                type={
-                                  ["year", "price", "mileage"].includes(fieldName)
-                                      ? "number"
-                                      : "text"
-                                }
-                                placeholder={fieldName}
-                            />
-                          </FormControl>
-                        </FormItem>
-                    )}
-                />
-            ))}
+    <div className="max-w-xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-bold text-center">Create Car</h1>
 
-            {/* Description */}
+      {/* Form */}
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          {[
+            "make",
+            "model",
+            "year",
+            "price",
+            "mileage",
+            "color",
+            "fuel_type",
+            "transmission",
+            "image",
+          ].map((name) => (
             <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description</FormLabel>
-                      <FormControl>
-                        <Textarea {...field} placeholder="Describe the car..." />
-                      </FormControl>
-                    </FormItem>
-                )}
+              key={name}
+              control={form.control}
+              name={name as keyof CarFormValues}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="capitalize">
+                    {name.replace("_", " ")}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      type={
+                        ["year", "price", "mileage"].includes(name)
+                          ? "number"
+                          : "text"
+                      }
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
             />
+          ))}
+          <FormField
+            control={form.control}
+            name="description"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Description</FormLabel>
+                <FormControl>
+                  <Textarea
+                    {...field}
+                    placeholder="Write a short description..."
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? "Submitting..." : "Submit Car"}
+          </Button>
+        </form>
+      </Form>
 
-            <Button type="submit" className="w-full">
-              Create Car
-            </Button>
-          </form>
-        </Form>
+      {/* Button Actions */}
+      <div className="space-y-2">
+        <Button
+          onClick={refreshAccessToken}
+          variant="outline"
+          className="w-full"
+          disabled={refreshing}
+        >
+          🔁 {refreshing ? "Refreshing..." : "Refresh Access Token"}
+        </Button>
+        <Button
+          onClick={checkTokenStatus}
+          variant="secondary"
+          size="sm"
+          className="w-full"
+        >
+          🔍 Check Token Status
+        </Button>
+        <Button
+          onClick={logOutAccessToken}
+          variant="secondary"
+          size="sm"
+          className="w-full"
+        >
+          🚪 Logout
+        </Button>
       </div>
+
+      {/* Result Display */}
+      {error && <p className="text-red-600">{error}</p>}
+      {message && <p className="text-green-600">{message}</p>}
+      {carData && (
+        <div className="bg-gray-50 p-4 rounded border text-sm whitespace-pre-wrap">
+          <h3 className="font-semibold mb-1">✅ Created Car Data:</h3>
+          <pre>{JSON.stringify(carData, null, 2)}</pre>
+        </div>
+      )}
+    </div>
   );
 }

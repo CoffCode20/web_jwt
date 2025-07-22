@@ -1,6 +1,7 @@
 "use client";
 
 import { getAuthToken, getRefreshToken, logout } from "@/lib/auth";
+import { useDeleteCarMutation } from "@/redux/service/car/car";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -16,87 +17,59 @@ import {
   FormMessage,
 } from "../ui/form";
 import { Input } from "../ui/input";
+import { useRouter } from "next/router";
 
-// Zod Schema
+// Zod schema
 const deleteCarSchema = z.object({
   id: z.string().min(1, { message: "Car ID is required" }),
 });
 
 export default function DeleteCarFormComponent() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const form = useForm<z.infer<typeof deleteCarSchema>>({
+    resolver: zodResolver(deleteCarSchema),
+    defaultValues: { id: "" },
+  });
 
-  // Check token on mount
+  const [refreshing, setRefreshing] = useState(false);
+  const [message, setMessage] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const router = useRouter();
+
+  // RTK Query mutation
+  const [deleteCar, { isLoading, isSuccess, isError, error }] =
+    useDeleteCarMutation();
+
   useEffect(() => {
     const token = getAuthToken();
     setIsAuthenticated(!!token);
-    if (!token) {
-      setMessage("Please login first to delete a car.");
-    }
   }, []);
 
-  const form = useForm<z.infer<typeof deleteCarSchema>>({
-    resolver: zodResolver(deleteCarSchema),
-    defaultValues: {
-      id: "",
-    },
-  });
-
-  // Delete request
-  async function onSubmit(values: z.infer<typeof deleteCarSchema>) {
-    setIsLoading(true);
-    setMessage("");
-    setError("");
+  const onSubmit = async (values: z.infer<typeof deleteCarSchema>) => {
+    const token = getAuthToken();
+    if (!token) {
+      setMessage("Please login first.");
+      return;
+    }
 
     try {
-      const token = getAuthToken();
-      if (!token) {
-        setMessage("Please login first.");
-        setIsLoading(false);
-        return;
-      }
-
-      const res = await fetch("/api/crud/delete-car", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(values),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        let errorMessage = data.message || "Failed to delete car";
-        if (res.status === 403) {
-          errorMessage = "Lub Car bos yg create.";
-        } else if (res.status === 404) {
-          errorMessage = "Car not found or already deleted.";
-        } else if (res.status === 401) {
-          errorMessage = "Authentication failed. Please login again.";
-        }
-
-        setError(errorMessage);
-        return;
-      }
-
+      await deleteCar({ id: values.id, accessToken: token }).unwrap();
       setMessage("✅ Car deleted successfully!");
       form.reset();
+      router.push("/")
     } catch (err) {
-      setError("An error occurred while deleting the car.");
-    } finally {
-      setIsLoading(false);
+      if (typeof err === "object" && err !== null && "data" in err) {
+        const errData = err as any;
+        setLocalError(errData.data?.message || "❌ Failed to delete car.");
+      } else {
+        setLocalError("❌ Unknown error.");
+      }
     }
-  }
+  };
 
-  // Refresh token
   const refreshAccessToken = async () => {
     setRefreshing(true);
-    setError("");
+    setLocalError("");
     setMessage("");
 
     try {
@@ -121,20 +94,18 @@ export default function DeleteCarFormComponent() {
 
       setMessage("🔁 Token refreshed successfully!");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setLocalError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setRefreshing(false);
     }
   };
 
-  // Logout
   const logOutAccessToken = () => {
     logout();
-    setMessage("You have been logged out.");
     form.reset();
+    setMessage("You have been logged out.");
   };
 
-  // Token status
   const checkTokenStatus = () => {
     const access = getAuthToken();
     const refresh = getRefreshToken();
@@ -146,9 +117,9 @@ export default function DeleteCarFormComponent() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
+    <div className="max-w-xl mx-auto space-y-4">
       {!isAuthenticated && (
-        <div className="mb-4 p-4 bg-yellow-100 border border-yellow-300 rounded-md">
+        <div className="p-4 bg-yellow-100 border border-yellow-300 rounded-md">
           <p className="text-yellow-800 mb-2">
             You need to login to delete a car.
           </p>
@@ -167,7 +138,7 @@ export default function DeleteCarFormComponent() {
           className="space-y-6 p-6 bg-white rounded-lg shadow-md"
         >
           {message && <p className="text-green-600">{message}</p>}
-          {error && <p className="text-red-600">{error}</p>}
+          {localError && <p className="text-red-600">{localError}</p>}
 
           <FormField
             control={form.control}
@@ -197,7 +168,7 @@ export default function DeleteCarFormComponent() {
         </form>
       </Form>
 
-      {/* Token Tools */}
+      {/* Token Actions */}
       <div className="space-y-2">
         <Button
           onClick={refreshAccessToken}

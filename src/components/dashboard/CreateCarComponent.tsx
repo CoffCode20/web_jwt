@@ -7,35 +7,45 @@ import {
   FormField,
   FormItem,
   FormLabel,
+  FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getAuthToken, getRefreshToken, logout } from "@/lib/auth";
+import { CreateCarType } from "@/lib/car/CarType";
+import { useCreateCarMutation } from "@/redux/service/car/car";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
+import { useRouter } from "next/router";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import secureLocalStorage from "react-secure-storage";
 import { z } from "zod";
 
-// 1. Zod Schema
-const carFormSchema = z.object({
-  make: z.string().min(1),
-  model: z.string().min(1),
-  year: z.coerce.number().int().gte(1886).lte(new Date().getFullYear()),
-  price: z.coerce.number().positive(),
-  mileage: z.coerce.number().nonnegative(),
-  description: z.string().optional(),
-  color: z.string().min(1),
-  fuel_type: z.string().min(1),
-  transmission: z.string().min(1),
-  image: z.string().url({ message: "Must be a valid image URL" }),
-});
-
-type CarFormValues = z.infer<typeof carFormSchema>;
-
 export default function CreateCarFormWithAuth() {
-  const form = useForm<CarFormValues>({
-    resolver: zodResolver(carFormSchema) as never,
+  const [createCar, { data, isLoading, isError, error }] =
+    useCreateCarMutation();
+  const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const router = useRouter();
+
+  // Zod schema
+  const formValidation = z.object({
+    make: z.string().min(3, { message: "At least 3 characters in make" }),
+    model: z.string().min(3, { message: "At least 3 characters in model" }),
+    year: z.coerce.number().int().gte(1900).lte(new Date().getFullYear()), // ✅ coercing string to number
+    price: z.coerce.number().positive({ message: "Price must be a number" }),
+    mileage: z.coerce.number().positive({ message: "Price must be a number" }),
+    description: z.string().min(5),
+    color: z.string().min(3),
+    fuel_type: z.string().min(2),
+    transmission: z.string().min(2),
+    image: z.string().min(3, { message: "At least 3 characters in image" }),
+  });
+
+  type FormSchema = z.infer<typeof formValidation>;
+  const form = useForm<FormSchema>({
+    resolver: zodResolver(formValidation) as any,
     defaultValues: {
       make: "",
       model: "",
@@ -50,54 +60,38 @@ export default function CreateCarFormWithAuth() {
     },
   });
 
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [carData, setCarData] = useState<CarFormValues | null>(null);
-
-  // Submit car data with token
-  async function onSubmit(values: CarFormValues) {
-    setLoading(true);
+  // Submit form
+  const onSubmit = (values: z.infer<typeof formValidation>) => {
+    setFormError("");
     setMessage("");
-    setError("");
-    try {
-      const token = getAuthToken();
-      if (!token) throw new Error("Access token missing!");
 
-      const res = await fetch("https://car-nextjs-api.cheatdev.online/cars", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(values),
-      });
-
-      const result = await res.json();
-
-      if (!res.ok) {
-        if (res.status === 401) {
-          throw new Error("Access token expired. Please refresh your token.");
-        }
-        throw new Error(result.message || "Failed to create car");
-      }
-
-      setMessage("✅ Car created successfully!");
-      setCarData(result.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
+    const accessToken = getAuthToken();
+    if (!accessToken) {
+      setFormError("❌ Access token missing!");
+      return;
     }
-  }
+
+    createCar({ newCar: values, accessToken });
+  };
+
+  // Watch result
+  useEffect(() => {
+    if (data) {
+      setMessage("✅ Car created successfully!");
+      form.reset();
+      router.push("/");
+    }
+    if (isError) {
+      const apiErr = error as any;
+      setFormError(apiErr?.data?.message || "❌ Failed to create car");
+    }
+  }, [data, isError, error, form]);
 
   // Refresh token
   const refreshAccessToken = async () => {
     setRefreshing(true);
-    setError("");
     setMessage("");
-
+    setFormError("");
     try {
       const refreshToken = getRefreshToken();
       if (!refreshToken) throw new Error("No refresh token found.");
@@ -120,7 +114,7 @@ export default function CreateCarFormWithAuth() {
 
       setMessage("🔁 Token refreshed successfully!");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setFormError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setRefreshing(false);
     }
@@ -129,11 +123,10 @@ export default function CreateCarFormWithAuth() {
   // Logout
   const logOutAccessToken = () => {
     logout();
-    setMessage("You have been logged out.");
-    setCarData(null);
+    setMessage("🚪 You have been logged out.");
   };
 
-  // Token check
+  // Token checker
   const checkTokenStatus = () => {
     const access = getAuthToken();
     const refresh = getRefreshToken();
@@ -148,7 +141,6 @@ export default function CreateCarFormWithAuth() {
     <div className="max-w-xl mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-bold text-center">Create Car</h1>
 
-      {/* Form */}
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
           {[
@@ -165,7 +157,7 @@ export default function CreateCarFormWithAuth() {
             <FormField
               key={name}
               control={form.control}
-              name={name as keyof CarFormValues}
+              name={name as keyof CreateCarType}
               render={({ field }) => (
                 <FormItem>
                   <FormLabel className="capitalize">
@@ -181,10 +173,12 @@ export default function CreateCarFormWithAuth() {
                       }
                     />
                   </FormControl>
+                  <FormMessage />
                 </FormItem>
               )}
             />
           ))}
+
           <FormField
             control={form.control}
             name="description"
@@ -197,16 +191,17 @@ export default function CreateCarFormWithAuth() {
                     placeholder="Write a short description..."
                   />
                 </FormControl>
+                <FormMessage />
               </FormItem>
             )}
           />
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Submitting..." : "Submit Car"}
+
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? "Submitting..." : "Submit Car"}
           </Button>
         </form>
       </Form>
 
-      {/* Button Actions */}
       <div className="space-y-2">
         <Button
           onClick={refreshAccessToken}
@@ -234,13 +229,13 @@ export default function CreateCarFormWithAuth() {
         </Button>
       </div>
 
-      {/* Result Display */}
-      {error && <p className="text-red-600">{error}</p>}
+      {formError && <p className="text-red-600">{formError}</p>}
       {message && <p className="text-green-600">{message}</p>}
-      {carData && (
+
+      {data && (
         <div className="bg-gray-50 p-4 rounded border text-sm whitespace-pre-wrap">
           <h3 className="font-semibold mb-1">✅ Created Car Data:</h3>
-          <pre>{JSON.stringify(carData, null, 2)}</pre>
+          <pre>{JSON.stringify(data, null, 2)}</pre>
         </div>
       )}
     </div>

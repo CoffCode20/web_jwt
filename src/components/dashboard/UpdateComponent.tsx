@@ -2,7 +2,9 @@
 
 import { Switch } from "@/components/ui/switch";
 import { getAuthToken, getRefreshToken, logout } from "@/lib/auth";
+import { useUpdateCarMutation } from "@/redux/service/car/car";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import secureLocalStorage from "react-secure-storage";
@@ -35,11 +37,13 @@ const updateCarSchema = z.object({
 });
 
 export default function UpdateCarFormComponent() {
-  const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  const [updateCar, { isLoading }] = useUpdateCarMutation();
+  const router = useRouter();
 
   useEffect(() => {
     const token = getAuthToken();
@@ -50,7 +54,7 @@ export default function UpdateCarFormComponent() {
   }, []);
 
   const form = useForm<z.infer<typeof updateCarSchema>>({
-    resolver: zodResolver(updateCarSchema) as any,
+    resolver: zodResolver(updateCarSchema) as never,
     defaultValues: {
       id: "",
       make: "",
@@ -117,37 +121,30 @@ export default function UpdateCarFormComponent() {
   };
 
   async function onSubmit(values: z.infer<typeof updateCarSchema>) {
-    setIsLoading(true);
     setMessage("");
     setError("");
 
     try {
-      const token = getAuthToken();
-      if (!token) {
+      const accessToken = getAuthToken();
+      if (!accessToken) {
         setMessage("Please login first");
-        setIsLoading(false);
         return;
       }
 
-      const res = await fetch("/api/crud/update-car", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(values),
-      });
+      const { id, ...rest } = values;
+      const updatedCar = {
+        ...rest,
+        description: rest.description ?? "",
+      };
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || "Failed to update car");
-      }
+      await updateCar({ id, updatedCar, accessToken }).unwrap();
 
       setMessage("✅ Car updated successfully!");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setIsLoading(false);
+      form.reset();
+
+      router.push("/");
+    } catch (err: any) {
+      setError(err?.data?.message || "Failed to update car");
     }
   }
 
@@ -192,6 +189,15 @@ export default function UpdateCarFormComponent() {
                             : "text"
                         }
                         placeholder={`Enter ${fieldName}`}
+                        {...(["year", "price", "mileage"].includes(fieldName)
+                          ? {
+                              value: field.value ?? "",
+                              onChange: (e) => field.onChange(e.target.value),
+                            }
+                          : {})}
+                        {...(["year", "price", "mileage"].includes(fieldName)
+                          ? { inputMode: "numeric" }
+                          : {})}
                       />
                     </FormControl>
                     <FormMessage />
@@ -240,7 +246,7 @@ export default function UpdateCarFormComponent() {
         </form>
       </Form>
 
-      {/* Token Management Buttons */}
+      {/* Token Management */}
       <div className="space-y-2">
         <Button
           onClick={refreshAccessToken}

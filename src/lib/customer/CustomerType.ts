@@ -7,4 +7,5 @@ export type CustomerType = {
   phone: string;
   gender: string;
   remark: string;
+  nationalCardId: string;
 };

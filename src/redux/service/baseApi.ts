@@ -1,18 +1,13 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import {
-  BaseQueryFn,
-  createApi,
-  FetchArgs,
-  fetchBaseQuery,
-} from "@reduxjs/toolkit/query/react";
-import { setAccessToken } from "../feature/authSlice";
+
+import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import { RootState } from "../store";
 
-// BaseQuery that targets the proxy route in Next.js
-const proxyBaseQuery = fetchBaseQuery({
+const baseQuery = fetchBaseQuery({
   baseUrl: "/api/proxy",
   prepareHeaders: (headers, { getState }) => {
-    const token = (getState() as RootState).auth.token;
+    const state = getState() as RootState;
+    const token = state.auth.accessToken;
+
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }
@@ -20,53 +15,44 @@ const proxyBaseQuery = fetchBaseQuery({
   },
 });
 
-// Wrapper for automatic re-authentication if 401/403 occurs
-const baseQueryWithReAuth: BaseQueryFn<
-  string | FetchArgs,
-  unknown,
-  unknown
-> = async (args, api, extraOptions) => {
-  // Initial request
-  let result = await proxyBaseQuery(args, api, extraOptions);
+const baseQueryWithReauth = async (args: any, api: any, extraOptions: any) => {
+  let result = await baseQuery(args, api, extraOptions);
 
-  // If unauthorized, attempt token refresh
-  if (result.error?.status === 401 || result.error?.status === 403) {
-    try {
-      const res = await fetch("/api/refresh", {
-        method: "GET",
-        credentials: "include", // Include cookies (refresh token)
+  if (result.error && result.error.status === 401) {
+    // Try to get a new token using the existing refresh API
+    const refreshResult = await fetch("/api/refresh", {
+      method: "GET",
+      credentials: "include",
+    });
+
+    if (refreshResult.ok) {
+      const refreshData = await refreshResult.json();
+
+      // Store the new token
+      api.dispatch({
+        type: "auth/updateTokens",
+        payload: {
+          accessToken: refreshData.accessToken,
+          refreshToken:
+            refreshData.refreshToken ||
+            (api.getState() as RootState).auth.refreshToken,
+        },
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        console.log("Token refreshed:", data);
-
-        // Update token in Redux store
-        api.dispatch(setAccessToken(data.accessToken));
-
-        // Retry original request with new token
-        result = await proxyBaseQuery(args, api, extraOptions);
-      } else {
-        // Logout on failure
-        const logoutRes = await fetch("/api/logout", {
-          method: "POST",
-          credentials: "include",
-        });
-        const logoutData = await logoutRes.json();
-        console.log("Logout response:", logoutData);
-      }
-    } catch (error) {
-      console.error("Error refreshing token:", error);
+      // Retry the original request
+      result = await baseQuery(args, api, extraOptions);
+    } else {
+      // Refresh failed, logout the user
+      api.dispatch({ type: "auth/logout" });
     }
   }
 
   return result;
-};
-
+}
 // Base API setup
 export const baseApi = createApi({
-  reducerPath: "baseApi",
-  baseQuery: baseQueryWithReAuth,
-  tagTypes: ["Cars"], // You can add more for cache invalidation
+  reducerPath: "api",
+  baseQuery: baseQueryWithReauth,
+  tagTypes: ["Customer", "Account"], 
   endpoints: () => ({}),
 });

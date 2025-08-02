@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
+import SessionWrapper from "./SessionProvider";
 import StoreProvider from "./StoreProvider";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -45,7 +46,9 @@ export default function RootLayout({
             </div>
           </div>
         </nav>
-        <StoreProvider >{children}</StoreProvider>
+        <SessionWrapper>
+          <StoreProvider>{children}</StoreProvider>
+        </SessionWrapper>
       </body>
     </html>
   );

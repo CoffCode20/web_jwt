@@ -12,6 +12,7 @@ import { CustomerType } from "@/lib/customer/CustomerType";
 import { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown, MoreHorizontal } from "lucide-react";
 import Link from "next/link";
+import { CustomerActions } from "./CustomAction";
 
 export const customerColumns: ColumnDef<CustomerType>[] = [
   {
@@ -85,29 +86,7 @@ export const customerColumns: ColumnDef<CustomerType>[] = [
     enableHiding: false,
     cell: ({ row }) => {
       const customer = row.original;
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <Link href={`/customers`}>Create</Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Link href={`/customers/edit/${customer.phone}`}>Edit</Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Link href={`/customers/delete/${customer.phone}`}>Delete</Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      );
+      return <CustomerActions customer={customer} />
     },
   },
 ];
